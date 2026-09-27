@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f5f5f5">
+<title>Signal &amp; Sense — Your AI briefing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css?v=8"><script src="/static/app.js?v=8" defer></script>
+</head>
+<body><div class="site-shell">
+<header class="topbar"><a class="brand" href="/" aria-label="Signal and Sense home"><span class="brand-mark" aria-hidden="true">s<span>+</span></span>signal &amp; sense</a><div class="topbar-right"><button id="demo-button" class="secondary-button" type="button">Present saved briefing</button><span class="workspace-label">Your AI reading room</span><span id="today"></span></div></header>
+<main>
+<div id="demo-banner" class="demo-banner" hidden><div><strong>Saved briefing · presentation mode</strong><p id="demo-note">An actual saved result. This view does not start a new search.</p></div><button id="exit-demo" class="secondary-button" type="button">Back to live workspace</button></div>
+<div id="connection-banner" class="notice" role="status" hidden>Reconnecting to the local app. The briefing remains visible.</div>
+<section class="page-title"><div><span class="eyebrow">AI, with your interests in mind.</span><h1>Your briefing.</h1><p>The major AI developments of the past seven days.</p></div><div class="delivery"><button id="teams-button" class="secondary-button" type="button" disabled>Share latest to Teams <span aria-hidden="true">↗</span></button><span id="teams-note">Teams connection optional for this demo.</span></div></section>
+<section class="setup" aria-label="Briefing preferences">
+<div class="personalization">
+<div class="mode-list" id="modes" aria-label="Briefing mode"><button class="active" type="button" data-mode="weekly" aria-pressed="true">This week in AI</button><button type="button" data-mode="explore" aria-pressed="false">Explore a topic</button></div>
+<label class="context-label" for="project-context">What are you working on? <span>Optional · helps explain why a story matters to you</span></label>
+<input id="project-context" maxlength="1000" placeholder="e.g. Learning agentic AI and building a Python app with free APIs">
+<div id="query-group"><label class="context-label" for="explore-query">Anything to keep an eye on? <span>Optional · comma-separated topics go directly into news searches</span></label><input id="explore-query" maxlength="200" placeholder="e.g. open-weight models, zero-shot classifiers, frontier benchmarks"></div>
+</div>
+<div class="setup-group"><span class="field-label">Follow your interests</span><div class="topic-list" id="topics">
+<button class="topic active" type="button" data-topic="agents" aria-pressed="true">AI agents</button>
+<button class="topic active" type="button" data-topic="models" aria-pressed="true">New models</button>
+<button class="topic" type="button" data-topic="tools" aria-pressed="false">AI products</button>
+<button class="topic" type="button" data-topic="open_source" aria-pressed="false">Open-source models</button>
+<button class="topic" type="button" data-topic="benchmarks" aria-pressed="false">Benchmarks</button></div></div>
+<div class="setup-group"><span class="field-label">Choose your depth</span><div class="depth-list" id="depths"><button type="button" data-depth="quick" aria-pressed="false">Quick read</button><button class="active" type="button" data-depth="explain" aria-pressed="true">Explained</button><button type="button" data-depth="technical" aria-pressed="false">More context</button></div></div>
+<div class="setup-group coverage-setting"><label class="field-label" for="max-updates">Briefing size</label><select id="max-updates"><option value="10">10 updates</option><option value="15" selected>15 updates</option><option value="25">25 updates</option></select><small>Your target. Replacements and extra searches help fill it.</small></div>
+<button id="run-button" class="run-button" type="button"><span>Generate my brief</span><span aria-hidden="true">↗</span></button>
+<button id="cancel-button" class="secondary-button" type="button" hidden>Cancel run</button><p id="config-note" hidden>Add GEMINI_API_KEY to your local .env file and restart the app.</p>
+</section>
+<section class="activity-panel" aria-labelledby="activity-title">
+<div class="activity-head"><div class="activity-heading"><span class="activity-symbol" aria-hidden="true">✳</span><div><h2 id="activity-title">Your agent at work</h2><p id="activity-current" role="status" aria-live="polite">Ready when you are. Choose your interests and generate a brief.</p></div></div><div class="activity-live"><span id="status-dot"></span><span id="status-label">READY</span></div></div>
+<ol class="workflow" aria-label="Briefing progress">
+<li data-stage="collect"><span class="step-number">1</span><div><strong>Discover</strong><small>Find recent stories</small></div></li>
+<li data-stage="decide"><span class="step-number">2</span><div><strong>Rank</strong><small>Impact + evidence + coverage</small></div></li>
+<li data-stage="inspect"><span class="step-number">3</span><div><strong>Read</strong><small>Inspect original sources</small></div></li>
+<li data-stage="write"><span class="step-number">4</span><div><strong>Explain</strong><small>Write your briefing</small></div></li>
+<li data-stage="saved"><span class="step-number">5</span><div><strong>Ready</strong><small>Save stories and links</small></div></li>
+</ol>
+<details class="activity-details"><summary>View all activity <span id="activity-count">0 events</span></summary><div id="activity-list" class="activity-list"><p class="activity-empty">Activity will appear here when you start a briefing.</p></div></details>
+</section>
+<section class="briefing" aria-labelledby="briefing-title"><div class="section-heading"><div><span class="eyebrow">Selected for you</span><h2 id="briefing-title">On your radar</h2></div><div class="brief-controls"><span id="brief-meta">Your next good idea starts here.</span><label for="brief-history" class="history-label">Saved briefings</label><select id="brief-history"><option value="">Latest briefing</option></select></div></div>
+<div class="reading-tools">
+<label class="search-stories-label">Find in this briefing<input id="story-search" type="search" placeholder="Search models, companies or topics"></label>
+<label>Category<select id="story-category"><option value="">All updates</option><option value="model">Models</option><option value="open_source">Open-source</option><option value="capability">New capabilities</option><option value="application">Applications</option><option value="benchmark">Benchmarks</option><option value="industry">Industry</option></select></label>
+<div class="export-actions"><button id="pin-button" class="secondary-button" type="button" disabled>Use for presentation</button><button id="export-button" class="secondary-button" type="button" disabled>Export brief ↓</button><button id="print-button" class="secondary-button" type="button" disabled>Print / PDF</button></div>
+</div><p id="filter-count" class="filter-count" aria-live="polite"></p>
+<div id="brief-content" class="brief-content"><div class="empty-state"><div class="empty-glyph" aria-hidden="true">↗</div><h3>Make room for a new idea.</h3><p>Choose your interests above. Your agent will find recent stories, read the sources, and bring back a briefing made for you.</p><span>Original sources · Clear explanations · Your perspective</span></div></div></section>
+</main><footer class="footer"><span>signal &amp; sense</span><span>A daily dose of perspective. Always linked to the source.</span></footer></div><div id="toast" class="toast" role="status" aria-live="polite"></div></body></html>
