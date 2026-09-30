@@ -101,7 +101,8 @@ def get_state():
         snapshot = dict(state)
         snapshot["activity"] = list(state["activity"])
     snapshot["briefing"] = _load_latest()
-    snapshot["configured"] = bool(os.getenv("GEMINI_API_KEY"))
+    _API_KEYS = ("GEMINI_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "OPENROUTER_API_KEY")
+    snapshot["configured"] = any(os.getenv(k) for k in _API_KEYS)
     snapshot["teams_configured"] = bool(os.getenv("TEAMS_WEBHOOK_URL"))
     return snapshot
 
@@ -114,8 +115,9 @@ def get_history():
 @app.post("/api/run")
 def start_run(preferences: Preferences):
     global last_started
-    if not os.getenv("GEMINI_API_KEY"):
-        raise HTTPException(status_code=400, detail="Set GEMINI_API_KEY and restart the app first.")
+    _API_KEYS = ("GEMINI_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "OPENROUTER_API_KEY")
+    if not any(os.getenv(k) for k in _API_KEYS):
+        raise HTTPException(status_code=400, detail="Set at least one API key (GEMINI/GROQ/MISTRAL/OPENROUTER) and restart.")
     with guard:
         if state["status"] in ("running", "cancelling"):
             raise HTTPException(status_code=409, detail="A briefing is already being generated.")

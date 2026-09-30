@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from memory import same_story
 from ranking import normalized, rank_event
 from sources import collect, collect_extra, shortlist, read_article, combine
@@ -25,7 +25,6 @@ DEPTHS = {"quick": "short plain-language update", "explain": "plain-language con
           "technical": "more context without requiring ML expertise"}
 MAX_CALLS = 18
 MAX_SEARCH_ROUNDS = 2
-_last_request_at = 0.0
 
 
 class BriefingError(RuntimeError):
@@ -46,34 +45,198 @@ class Event(BaseModel):
     players: list[str] = Field(default_factory=list, description="Organizations explicitly named in the supplied evidence")
     entities: list[str] = Field(default_factory=list, description="Up to four distinctive model/product names or phrases from the evidence; exclude generic AI terms")
 
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalize_category(cls, v):
+        if not isinstance(v, str):
+            return "capability"
+        val = v.lower().strip().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "models": "model",
+            "open_source": "open_source",
+            "opensource": "open_source",
+            "open_weights": "open_source",
+            "open_weight": "open_source",
+            "capabilities": "capability",
+            "applications": "application",
+            "app": "application",
+            "tools": "application",
+            "tool": "application",
+            "agent": "capability",
+            "agents": "capability",
+            "benchmarks": "benchmark",
+            "benchmark": "benchmark",
+            "industry": "industry",
+            "business": "industry",
+            "research": "capability",
+            "general": "industry",
+        }
+        if val in ("model", "open_source", "capability", "application", "benchmark", "industry"):
+            return val
+        return aliases.get(val, "capability")
+
+    @field_validator("significance", mode="before")
+    @classmethod
+    def normalize_significance(cls, v):
+        if not isinstance(v, str):
+            return "noteworthy"
+        val = v.lower().strip()
+        if "major" in val or "high" in val or "critical" in val:
+            return "major"
+        if "minor" in val or "low" in val:
+            return "minor"
+        return "noteworthy"
+
+    @field_validator("impact", "novelty", "evidence", "ecosystem", "relevance", mode="before")
+    @classmethod
+    def clamp_score(cls, v):
+        try:
+            return max(0, min(5, int(round(float(v)))))
+        except Exception:
+            return 3
+
+    @field_validator("indices", mode="before")
+    @classmethod
+    def normalize_indices(cls, v):
+        if isinstance(v, (int, str)):
+            try:
+                return [int(v)]
+            except Exception:
+                return [0]
+        if isinstance(v, (list, tuple)):
+            res = []
+            for item in v:
+                try:
+                    res.append(int(item))
+                except Exception:
+                    pass
+            return res or [0]
+        return [0]
+
+    @field_validator("event_key", "reason", mode="before")
+    @classmethod
+    def normalize_str(cls, v):
+        return str(v) if v is not None else ""
+
 
 class Rejection(BaseModel):
     index: int
     category: Literal["duplicate_event", "minor_update", "paper", "off_topic", "weak_evidence"]
     reason: str
 
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalize_rejection_category(cls, v):
+        if not isinstance(v, str):
+            return "minor_update"
+        val = v.lower().strip().replace("-", "_").replace(" ", "_")
+        if val in ("duplicate_event", "minor_update", "paper", "off_topic", "weak_evidence"):
+            return val
+        if "dup" in val:
+            return "duplicate_event"
+        if "paper" in val or "arxiv" in val:
+            return "paper"
+        if "off" in val or "topic" in val:
+            return "off_topic"
+        if "weak" in val or "evidence" in val:
+            return "weak_evidence"
+        return "minor_update"
+
 
 class Review(BaseModel):
-    events: list[Event]
+    events: list[Event] = Field(default_factory=list)
     rejected: list[Rejection] = Field(default_factory=list)
-    followup_queries: list[str] = Field(default_factory=list, max_length=4)
+    followup_queries: list[str] = Field(default_factory=list)
+
+    @field_validator("events", mode="before")
+    @classmethod
+    def filter_events(cls, v):
+        if not isinstance(v, list):
+            return []
+        valid = []
+        for item in v:
+            if isinstance(item, dict):
+                try:
+                    valid.append(Event.model_validate(item))
+                except Exception:
+                    pass
+            elif isinstance(item, Event):
+                valid.append(item)
+        return valid
+
+    @field_validator("rejected", mode="before")
+    @classmethod
+    def filter_rejected(cls, v):
+        if not isinstance(v, list):
+            return []
+        valid = []
+        for item in v:
+            if isinstance(item, dict):
+                try:
+                    valid.append(Rejection.model_validate(item))
+                except Exception:
+                    pass
+            elif isinstance(item, Rejection):
+                valid.append(item)
+        return valid
+
+    @field_validator("followup_queries", mode="before")
+    @classmethod
+    def norm_queries(cls, v):
+        if isinstance(v, list):
+            return [str(q)[:180] for q in v if q][:4]
+        return []
 
 
 class WrittenStory(BaseModel):
     index: int
-    deck: str
-    summary: str
-    why_it_matters: str
-    topics: list[str]
-    next_step: str
-    evidence: str
-    novelty: str
-    exclusion_reason: str
-    supported: bool
+    deck: str = ""
+    summary: str = ""
+    why_it_matters: str = ""
+    topics: list[str] = Field(default_factory=list)
+    next_step: str = ""
+    evidence: str = ""
+    novelty: str = ""
+    exclusion_reason: str = ""
+    supported: bool = True
+
+    @field_validator("supported", mode="before")
+    @classmethod
+    def norm_supported(cls, v):
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            return v.lower().strip() in ("true", "1", "yes")
+        return bool(v)
+
+    @field_validator("topics", mode="before")
+    @classmethod
+    def norm_topics(cls, v):
+        if isinstance(v, list):
+            return [str(t) for t in v]
+        if isinstance(v, str):
+            return [v]
+        return []
 
 
 class WrittenBrief(BaseModel):
-    stories: list[WrittenStory]
+    stories: list[WrittenStory] = Field(default_factory=list)
+
+    @field_validator("stories", mode="before")
+    @classmethod
+    def filter_stories(cls, v):
+        if not isinstance(v, list):
+            return []
+        valid = []
+        for item in v:
+            if isinstance(item, dict):
+                try:
+                    valid.append(WrittenStory.model_validate(item))
+                except Exception:
+                    pass
+            elif isinstance(item, WrittenStory):
+                valid.append(item)
+        return valid
 
 
 def safe_error(exc):
@@ -111,12 +274,12 @@ def build_briefing(preferences, log, ask, *, discover=collect, search=collect_ex
     read_budget = target * 3 + 15
     attempted_events = set()
 
-    def model_call(prompt, schema):
+    def model_call(prompt, schema, task="write"):
         nonlocal logical_calls
         if logical_calls >= MAX_CALLS:
             raise BriefingError("The editorial call budget was reached. Try a smaller briefing or present a saved run.")
         logical_calls += 1
-        return ask(prompt, schema)
+        return ask(prompt, schema, task=task)
 
     def mark(items, stage, reason, **extras):
         for item in items:
@@ -133,16 +296,16 @@ def build_briefing(preferences, log, ask, *, discover=collect, search=collect_ex
         nonlocal next_queries
         # Previously reviewed URLs do not consume a second review budget.
         candidates = [x for x in shortlist(records, watch=query, limit=360)
-                      if not any(r["url"] in reviewed for r in x.get("coverage_records", [x]))][:60]
+                      if not any(r["url"] in reviewed for r in x.get("coverage_records", [x]))][:30]
         if not candidates:
             return
         catalog = [{
-            "index": i, "title": x["title"], "source": x["source"],
+            "index": i, "title": x["title"][:90], "source": x["source"],
             "date": x["published"][:10], "date_basis": x["date_basis"],
-            "official": x["official"], "description": x["summary"][:400],
+            "official": x["official"], "description": x["summary"][:160],
             "hn_points": x["points"], "hn_comments": x["comments"],
-            "related": [{"title": r["title"], "source": r["source"]}
-                        for r in x.get("coverage_records", [x])[:6]],
+            "related": [{"title": r["title"][:70], "source": r["source"]}
+                        for r in x.get("coverage_records", [x])[:2]],
         } for i, x in enumerate(candidates)]
         log("decide", f"Ranking {len(candidates)} candidates",
             f"Target: {target} supported updates. Keeping useful reserves for replacements.")
@@ -172,7 +335,7 @@ def build_briefing(preferences, log, ask, *, discover=collect, search=collect_ex
             "never invent model names, versions, or facts. "
             + json.dumps({"mode": mode, "interests": topics, "watch_query": query,
                           "target": target, "previous_events": list(attempted_events | {e["key"] for e in queue}),
-                          "CATALOG": catalog}, ensure_ascii=False), Review)
+                          "CATALOG": catalog}, ensure_ascii=False), Review, task="review")
         for x in candidates:
             reviewed.add(x["url"])
             reviewed.update(r["url"] for r in x.get("coverage_records", []))
@@ -260,7 +423,7 @@ def build_briefing(preferences, log, ask, *, discover=collect, search=collect_ex
                     "input": {"title": item["title"], "source": item["source"],
                               "published": metadata["published"], "date_basis": metadata["date_basis"],
                               "evidence_kind": metadata["evidence_kind"], "official": item["official"],
-                              "article_text": excerpt[:5500], "publisher_excerpt": publisher_excerpt[:1800],
+                              "article_text": excerpt[:2400], "publisher_excerpt": publisher_excerpt[:1000],
                               "selection_reason": event["reason"],
                               "section": "lead" if event["ranking"]["score"] >= 70 else "brief"}}
         mark(event["members"], "insufficient_evidence",
@@ -288,7 +451,7 @@ def build_briefing(preferences, log, ask, *, discover=collect, search=collect_ex
                 "evidence. next_step may be empty. Keep jargon low. Topics from "
                 + str(list(TOPICS)) + ". "
                 + json.dumps({"project_context": context, "SOURCES": [x["input"] for x in entries]},
-                             ensure_ascii=False), WrittenBrief)
+                             ensure_ascii=False), WrittenBrief, task="write")
         result = write(batch)
         returned = {s.index: s for s in result.stories if 0 <= s.index < len(batch)}
         missing = [x for x in batch if x["input"]["index"] not in returned]
@@ -440,57 +603,26 @@ def build_briefing(preferences, log, ask, *, discover=collect, search=collect_ex
 
 
 def run(preferences: dict, log: Callable[[str, str, str], None]) -> dict:
-    key = os.getenv("GEMINI_API_KEY")
-    if not key:
-        raise BriefingError("Add GEMINI_API_KEY to the local .env file and restart the app.")
-    from google import genai
-    from google.genai import types
-    client = genai.Client(api_key=key, http_options=types.HttpOptions(
-        timeout=90000, retry_options=types.HttpRetryOptions(attempts=1)))
-    model = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
-    fallback = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.1-flash-lite")
-    calls, models_used = 0, []
+    from providers import ProviderRouter
 
-    def ask(prompt, schema):
-        nonlocal model, calls
-        global _last_request_at
-        for attempt in range(2):
-            if calls >= MAX_CALLS:
-                raise BriefingError("The model-call budget was reached. Supported results were retained.")
-            # Space requests across successive runs in this server process.
-            delay = max(0, 13 - (time.monotonic() - _last_request_at))
-            if delay:
-                log("wait", "Pacing model requests", f"Waiting {int(delay) + 1}s to reduce rate-limit pressure.")
-                time.sleep(delay)
-            log("decide" if schema is Review else "write", "Contacting the editor", model)
-            _last_request_at = time.monotonic()
-            calls += 1
-            if model not in models_used:
-                models_used.append(model)
-            try:
-                result = client.interactions.create(
-                    model=model, input=prompt,
-                    response_format={"type": "text", "mime_type": "application/json",
-                                     "schema": schema.model_json_schema()})
-                if not result.output_text:
-                    raise ValueError("Empty model response")
-                return schema.model_validate_json(result.output_text)
-            except InterruptedError:
-                raise
-            except Exception as exc:
-                code = str(getattr(exc, "code", getattr(exc, "status_code", "")))
-                if (attempt == 0 and model != fallback
-                        and (code in ("429", "500", "502", "503", "504")
-                             or isinstance(exc, TimeoutError)
-                             or "timeout" in type(exc).__name__.lower())):
-                    model = fallback
-                    log("warning", "Switching to the fallback model",
-                        "The first model timed out, was rate-limited or unavailable. One fallback attempt.")
-                    continue
-                raise
+    if not any(os.getenv(k) for k in ("GEMINI_API_KEY", "GROQ_API_KEY",
+                                       "MISTRAL_API_KEY", "OPENROUTER_API_KEY")):
+        raise BriefingError(
+            "Add at least one API key (GEMINI / GROQ / MISTRAL / OPENROUTER) to .env and restart.")
+
+    router = ProviderRouter(log)
+    calls = 0
+
+    def ask(prompt, schema, task="write"):
+        nonlocal calls
+        if calls >= MAX_CALLS:
+            raise BriefingError("The model-call budget was reached. Supported results were retained.")
+        calls += 1
+        return router.ask(prompt, schema, task=task)
+
     try:
         briefing = build_briefing(preferences, log, ask)
-        briefing.update(model=model, models_used=models_used, model_calls=calls)
+        briefing.update(providers_used=router.models_used, model_calls=calls)
         return briefing
     finally:
-        client.close()
+        router.close()
