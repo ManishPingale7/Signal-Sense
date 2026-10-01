@@ -24,7 +24,7 @@ historyPicker.addEventListener("change", () => {
 });
 async function refreshHistory(latest) {
   if (!latest || latestHistoryId === latest.id) return;
-  const response = await fetch("/api/history", {cache: "no-store"});
+  const response = await fetch("/api/history", {cache: "no-store", signal: AbortSignal.timeout(8000)});
   if (!response.ok) return;
   const payload = await response.json();
   historyBriefs = payload.briefings || [];
@@ -144,7 +144,8 @@ async function post(path, body) {
   const response = await fetch(path, {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(body || {})
+    body: JSON.stringify(body || {}),
+    signal: AbortSignal.timeout(15000)
   });
   let payload;
   try { payload = await response.json(); } catch (_) { payload = {}; }
@@ -485,7 +486,7 @@ function applyDemoMode() {
 
 async function enterDemo() {
   try {
-    const response = await fetch("/api/demo", {cache: "no-store"});
+    const response = await fetch("/api/demo", {cache: "no-store", signal: AbortSignal.timeout(8000)});
     if (!response.ok) throw new Error("Could not load the saved demo.");
     const data = await response.json();
     if (!data.briefing) {
@@ -503,7 +504,8 @@ async function enterDemo() {
     document.getElementById("status-label").textContent = "SAVED RUN";
     document.querySelector(".activity-live").className = "activity-live complete";
     pinButton.disabled = true;
-  } catch (error) { message(error.message); }
+    runButton.disabled = true; teamsButton.disabled = true;
+  } catch (error) { demoMode = false; applyDemoMode(); message(error.message); }
 }
 
 demoButton.addEventListener("click", enterDemo);
@@ -558,12 +560,22 @@ async function refresh() {
     renderActivity(data.activity || []);
     try { await refreshHistory(data.briefing); } catch (_) { /* Current briefing remains usable. */ }
     if (!historyPicker.value) renderBrief(data.briefing);
+    if (data.saved_demo && data.briefing) {
+      demoMode = true; lastBriefId = null;
+      renderBrief(data.briefing); applyDemoMode();
+      renderActivity(data.briefing.activity || []);
+      renderProgress({status: "complete", activity: data.briefing.activity || []});
+      document.getElementById("status-label").textContent = "SAVED RUN";
+      runButton.disabled = true; teamsButton.disabled = true; cancelButton.hidden = true;
+      message("Live service unavailable. Showing a dated saved briefing.");
+      return;
+    }
     const isRunning = ["running", "cancelling"].includes(data.status);
     runButton.disabled = isRunning || !data.configured;
     runButton.firstElementChild.textContent = isRunning ? "Preparing your brief…" : "Generate my brief";
     cancelButton.hidden = !isRunning;
     cancelButton.disabled = data.status === "cancelling";
-    demoButton.disabled = isRunning;
+    demoButton.disabled = false;
     document.getElementById("config-note").hidden = data.configured;
     document.querySelector(".activity-live").className = "activity-live " + data.status;
     document.getElementById("status-label").textContent =

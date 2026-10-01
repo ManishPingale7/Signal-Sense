@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from agent import run, safe_error
-from memory import history, remember
+from memory import history, remember, valid_briefing
 from typing import Literal
 
 ROOT = Path(__file__).resolve().parent
@@ -35,7 +35,7 @@ state = {"status": "idle", "activity": [], "error": None, "started_at": None}
 
 
 class Preferences(BaseModel):
-    topics: list[str] = Field(default_factory=lambda: ["agents", "models"])
+    topics: list[str] = Field(default_factory=lambda: ["agents", "models"], max_length=12)
     depth: Literal["quick", "explain", "technical"] = "explain"
     mode: Literal["weekly", "explore", "new"] = "weekly"  # Accept old clients; run maps new to weekly.
     context: str = Field(default="", max_length=1000)
@@ -47,14 +47,17 @@ def _load_latest() -> dict | None:
     if not LATEST.exists():
         return None
     try:
-        return json.loads(LATEST.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        value = json.loads(LATEST.read_text(encoding="utf-8"))
+        return value if valid_briefing(value) else None
+    except (OSError, ValueError):
         return None
 
 
 def _activity(kind: str, title: str, detail: str) -> None:
     if cancel_event.is_set():
         raise InterruptedError("Run cancelled")
+    if kind == "checkpoint":
+        return
     entry = {"kind": kind, "title": title, "detail": detail,
              "at": datetime.now().strftime("%H:%M:%S")}
     with guard:
@@ -83,10 +86,11 @@ def _worker(preferences: dict) -> None:
                 "detail": "Your saved briefings are still available.", "at": datetime.now().strftime("%H:%M:%S")})
     except Exception as exc:
         message = safe_error(exc)
+        available = _load_latest() or _demo_briefing()
         with guard:
-            state["status"] = "error"
+            state["status"] = "fallback" if available else "error"
             state["error"] = message
-            state["activity"].append({"kind": "error", "title": "The run stopped",
+            state["activity"].append({"kind": "error", "title": "Saved briefing ready" if available else "Live run unavailable",
                 "detail": message, "at": datetime.now().strftime("%H:%M:%S")})
 
 
@@ -101,6 +105,9 @@ def get_state():
         snapshot = dict(state)
         snapshot["activity"] = list(state["activity"])
     snapshot["briefing"] = _load_latest()
+    snapshot["saved_demo"] = snapshot["status"] == "fallback"
+    if snapshot["saved_demo"]:
+        snapshot["briefing"] = _demo_briefing() or snapshot["briefing"]
     _API_KEYS = ("GEMINI_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "OPENROUTER_API_KEY")
     snapshot["configured"] = any(os.getenv(k) for k in _API_KEYS)
     snapshot["teams_configured"] = bool(os.getenv("TEAMS_WEBHOOK_URL"))
@@ -155,7 +162,7 @@ def _demo_briefing():
     if pinned.exists():
         try:
             value = json.loads(pinned.read_text(encoding="utf-8"))
-            if isinstance(value, dict) and value.get("stories"):
+            if valid_briefing(value):
                 return value
         except (ValueError, OSError):
             pass
@@ -163,7 +170,7 @@ def _demo_briefing():
     if bundled.exists():
         try:
             value = json.loads(bundled.read_text(encoding="utf-8"))
-            if isinstance(value, dict) and value.get("stories"):
+            if valid_briefing(value):
                 return value
         except (ValueError, OSError):
             pass

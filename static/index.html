@@ -6,7 +6,7 @@
 <title>Signal &amp; Sense — Your AI briefing</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/styles.css?v=8"><script src="/static/app.js?v=8" defer></script>
+<link rel="stylesheet" href="/static/styles.css?v=9"><script src="/static/app.js?v=9" defer></script>
 </head>
 <body><div class="site-shell">
 <header class="topbar"><a class="brand" href="/" aria-label="Signal and Sense home"><span class="brand-mark" aria-hidden="true">s<span>+</span></span>signal &amp; sense</a><div class="topbar-right"><button id="demo-button" class="secondary-button" type="button">Present saved briefing</button><span class="workspace-label">Your AI reading room</span><span id="today"></span></div></header>
@@ -30,7 +30,7 @@
 <div class="setup-group"><span class="field-label">Choose your depth</span><div class="depth-list" id="depths"><button type="button" data-depth="quick" aria-pressed="false">Quick read</button><button class="active" type="button" data-depth="explain" aria-pressed="true">Explained</button><button type="button" data-depth="technical" aria-pressed="false">More context</button></div></div>
 <div class="setup-group coverage-setting"><label class="field-label" for="max-updates">Briefing size</label><select id="max-updates"><option value="10">10 updates</option><option value="15" selected>15 updates</option><option value="25">25 updates</option></select><small>Your target. Replacements and extra searches help fill it.</small></div>
 <button id="run-button" class="run-button" type="button"><span>Generate my brief</span><span aria-hidden="true">↗</span></button>
-<button id="cancel-button" class="secondary-button" type="button" hidden>Cancel run</button><p id="config-note" hidden>Add GEMINI_API_KEY to your local .env file and restart the app.</p>
+<button id="cancel-button" class="secondary-button" type="button" hidden>Cancel run</button><p id="config-note" hidden>Add a Gemini, Groq, Mistral or OpenRouter API key to your local .env file and restart.</p>
 </section>
 <section class="activity-panel" aria-labelledby="activity-title">
 <div class="activity-head"><div class="activity-heading"><span class="activity-symbol" aria-hidden="true">✳</span><div><h2 id="activity-title">Your agent at work</h2><p id="activity-current" role="status" aria-live="polite">Ready when you are. Choose your interests and generate a brief.</p></div></div><div class="activity-live"><span id="status-dot"></span><span id="status-label">READY</span></div></div>

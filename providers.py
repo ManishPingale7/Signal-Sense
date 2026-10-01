@@ -5,6 +5,26 @@ import json
 import os
 import time
 from typing import Callable
+import threading
+
+_REQUEST_TIMES = {}
+_COOLDOWNS = {}
+_PACING_LOCK = threading.Lock()
+MAX_ATTEMPTS = 24
+
+class ProviderUnavailable(RuntimeError):
+    """Safe error that never contains a remote response or credential."""
+
+def failure_kind(exc):
+    code = str(getattr(exc, "status_code", getattr(exc, "code", "")))
+    message = str(exc).lower()
+    if code == "429" or "429" in message or "rate limit" in message or "quota" in message:
+        return "rate limit"
+    if code in ("401", "403"):
+        return "credentials rejected"
+    if isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower():
+        return "request timed out"
+    return "request unavailable or invalid response"
 
 from pydantic import BaseModel
 
@@ -29,23 +49,28 @@ class Provider:
         self.name = name
         self.model = model
         self.min_delay = min_delay
-        self._last_request_at = 0.0
 
     def pace(self, log: Callable):
         """Enforce minimum delay between requests to this specific provider."""
-        delay = max(0, self.min_delay - (time.monotonic() - self._last_request_at))
+        with _PACING_LOCK:
+            delay = max(0, _REQUEST_TIMES.get(self.name, 0) + self.min_delay - time.monotonic())
         if delay:
-            log("wait", f"Pacing {self.name} requests",
-                f"Waiting {int(delay) + 1}s to reduce rate-limit pressure.")
-            time.sleep(delay)
-        self._last_request_at = time.monotonic()
+            log("wait", f"Pacing {self.name} requests", f"Waiting {int(delay) + 1}s.")
+        deadline = time.monotonic() + delay
+        while time.monotonic() < deadline:
+            time.sleep(min(.25, max(0, deadline - time.monotonic())))
+            log("checkpoint", "", "")
+        with _PACING_LOCK:
+            _REQUEST_TIMES[self.name] = time.monotonic()
 
     def call(self, prompt: str, schema: type[BaseModel], log: Callable) -> BaseModel:
         raise NotImplementedError
 
     def close(self):
         """Release any resources held by the provider."""
-        pass
+        close = getattr(getattr(self, "client", None), "close", None)
+        if close:
+            close()
 
 
 # ---------------------------------------------------------------------------
@@ -60,38 +85,26 @@ class GeminiProvider(Provider):
         from google.genai import types
 
         model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
-        super().__init__("Gemini", model, min_delay=10)
+        super().__init__("Gemini", model, min_delay=13)
         self.client = genai.Client(
             api_key=os.getenv("GEMINI_API_KEY"),
             http_options=types.HttpOptions(
-                timeout=90_000,
-                retry_options=types.HttpRetryOptions(attempts=2),
+                timeout=45_000,
+                retry_options=types.HttpRetryOptions(attempts=1),
             ),
         )
 
     def call(self, prompt, schema, log):
         self.pace(log)
         log("decide", f"Calling {self.name}", self.model)
-        for attempt in range(2):
-            try:
-                result = self.client.interactions.create(
-                    model=self.model,
-                    input=prompt,
-                    response_format={
-                        "type": "text",
-                        "mime_type": "application/json",
-                        "schema": schema.model_json_schema(),
-                    },
-                )
-                if not result.output_text:
-                    raise ValueError("Empty Gemini response")
-                return schema.model_validate_json(_clean_json_text(result.output_text))
-            except Exception as exc:
-                if attempt == 0 and ("503" in str(exc) or "demand" in str(exc).lower()):
-                    log("wait", "Gemini busy, retrying", "503 high demand; waiting 3s before retry.")
-                    time.sleep(3)
-                    continue
-                raise
+        result = self.client.interactions.create(
+            model=self.model, input=prompt,
+            response_format={"type": "text", "mime_type": "application/json",
+                             "schema": schema.model_json_schema()},
+        )
+        if not result.output_text:
+            raise ValueError("Empty Gemini response")
+        return schema.model_validate_json(_clean_json_text(result.output_text))
 
     def close(self):
         self.client.close()
@@ -105,7 +118,7 @@ class GroqProvider(Provider):
 
         model = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
         super().__init__("Groq", model, min_delay=5)
-        self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        self.client = Groq(api_key=os.getenv("GROQ_API_KEY"), timeout=45, max_retries=0)
 
     def call(self, prompt, schema, log):
         self.pace(log)
@@ -122,7 +135,7 @@ class GroqProvider(Provider):
                 {"role": "user", "content": prompt},
             ],
             response_format={"type": "json_object"},
-            max_tokens=950,
+            max_tokens=6000,
             temperature=0.2,
         )
         text = result.choices[0].message.content
@@ -142,7 +155,7 @@ class MistralProvider(Provider):
 
         model = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
         super().__init__("Mistral", model, min_delay=5)
-        self.client = Mistral(api_key=os.getenv("MISTRAL_API_KEY"))
+        self.client = Mistral(api_key=os.getenv("MISTRAL_API_KEY"), timeout_ms=45_000, retry_config=None)
 
     def call(self, prompt, schema, log):
         self.pace(log)
@@ -159,6 +172,7 @@ class MistralProvider(Provider):
                 {"role": "user", "content": prompt},
             ],
             response_format={"type": "json_object"},
+            max_tokens=6000,
             temperature=0.2,
         )
         text = result.choices[0].message.content
@@ -177,7 +191,7 @@ class OpenRouterProvider(Provider):
         super().__init__("OpenRouter", model, min_delay=8)
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
-            api_key=os.getenv("OPENROUTER_API_KEY"),
+            api_key=os.getenv("OPENROUTER_API_KEY"), timeout=45, max_retries=0,
         )
 
     def call(self, prompt, schema, log):
@@ -195,6 +209,7 @@ class OpenRouterProvider(Provider):
                 {"role": "user", "content": prompt},
             ],
             response_format={"type": "json_object"},
+            max_tokens=6000,
             temperature=0.2,
         )
         text = result.choices[0].message.content
@@ -218,8 +233,8 @@ _PROVIDER_KEYS: dict[str, tuple[str, type[Provider]]] = {
 #   "review"  — fast inference preferred (ranking 60 candidates quickly)
 #   "write"   — high quality preferred (newsletter prose)
 ROUTES: dict[str, list[str]] = {
-    "review": ["groq",   "gemini", "openrouter"],
-    "write":  ["gemini", "groq",   "openrouter"],
+    "review": ["groq", "gemini", "mistral", "openrouter"],
+    "write":  ["gemini", "groq", "mistral", "openrouter"],
 }
 
 
@@ -238,6 +253,7 @@ class ProviderRouter:
         self.providers: dict[str, Provider] = {}
         self.disabled: set[str] = set()
         self.models_used: list[str] = []
+        self.attempts = 0
 
         for key, (env_var, cls) in _PROVIDER_KEYS.items():
             if os.getenv(env_var):
@@ -245,9 +261,9 @@ class ProviderRouter:
                     self.providers[key] = cls()
                     log("collect", f"{cls.__name__[:-8]} provider ready",
                         f"Model: {self.providers[key].model}")
-                except Exception as exc:
+                except Exception:
                     log("warning", f"{cls.__name__[:-8]} init failed",
-                        f"{type(exc).__name__}: {str(exc)[:60]}; skipping this provider.")
+                        "Provider could not be initialised; check configuration. Skipping it.")
 
         if not self.providers:
             raise RuntimeError(
@@ -263,14 +279,15 @@ class ProviderRouter:
         route = ROUTES.get(task, ROUTES["write"])
         # Only include providers that are actually configured and not disabled.
         chain = [r for r in route if r in self.providers and r not in self.disabled]
+        chain = [key for key in chain if _COOLDOWNS.get(key, 0) <= time.monotonic()]
         if not chain:
-            # If all were disabled, reset to try configured ones again
-            chain = [r for r in route if r in self.providers]
-            self.disabled.clear()
-
-        last_exc: Exception | None = None
-        for i, provider_key in enumerate(chain):
+            raise ProviderUnavailable("All configured providers are unavailable. Open the saved demo or try again later.")
+        for provider_key in chain:
+            if self.attempts >= MAX_ATTEMPTS:
+                raise ProviderUnavailable("The request budget was reached. Your saved briefing remains available.")
             provider = self.providers[provider_key]
+            self.log("checkpoint", "", "")
+            self.attempts += 1
             try:
                 result = provider.call(prompt, schema, self.log)
                 if provider.name not in self.models_used:
@@ -279,24 +296,13 @@ class ProviderRouter:
             except InterruptedError:
                 raise
             except Exception as exc:
-                last_exc = exc
-                # If provider hit quota limit (e.g. 0 req/min or 429), disable for the run
-                if "429" in str(exc) or "rate limit" in str(exc).lower():
-                    self.disabled.add(provider_key)
-                if i < len(chain) - 1:
-                    err_msg = str(exc)
-                    if len(err_msg) > 75:
-                        err_msg = err_msg[:72] + "..."
-                    self.log(
-                        "warning",
-                        f"{provider.name} failed ({type(exc).__name__})",
-                        f"{err_msg} Falling back to next provider.",
-                    )
-                    continue
-                raise
-
-        # All providers in the chain failed.
-        raise last_exc  # type: ignore[misc]
+                kind = failure_kind(exc)
+                self.disabled.add(provider_key)
+                # Persist a cooldown across runs; never retry an exhausted provider in this run.
+                _COOLDOWNS[provider_key] = time.monotonic() + (300 if kind == "rate limit" else 60)
+                self.log("warning", f"{provider.name}: {kind}",
+                         "Trying another configured provider. Saved briefings remain available.")
+        raise ProviderUnavailable("Live providers are unavailable. Your saved briefing is preserved; open the saved demo.")
 
     def close(self):
         """Release resources for all initialised providers."""

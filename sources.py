@@ -6,6 +6,7 @@ import json
 import math
 import re
 import socket
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -115,7 +116,10 @@ def _safe_url(url):
 def _get(url, params=None):
     if params:
         url += ("&" if "?" in url else "?") + urlencode(params)
+    deadline = time.monotonic() + 30
     for _ in range(5):
+        if time.monotonic() > deadline:
+            raise TimeoutError("Source reading deadline reached")
         _safe_url(url)
         with requests.get(url, headers=HEADERS, timeout=TIMEOUT,
                           allow_redirects=False, stream=True) as response:
@@ -125,6 +129,8 @@ def _get(url, params=None):
             response.raise_for_status()
             chunks, total = [], 0
             for chunk in response.iter_content(32768):
+                if time.monotonic() > deadline:
+                    raise TimeoutError("Source reading deadline reached")
                 total += len(chunk)
                 if total > MAX_BYTES:
                     raise ValueError("Source exceeded the reader size limit")
@@ -257,6 +263,10 @@ def _jobs(jobs, log=None):
                                  "recent_results": len(items)})
                 if log:
                     log("collect", name, f"{len(items)} results from the past seven days")
+            except InterruptedError:
+                for pending_job in pending:
+                    pending_job.cancel()
+                raise
             except Exception as exc:
                 # Do not surface raw exception URLs, headers, or credentials.
                 reason = type(exc).__name__

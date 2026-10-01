@@ -33,7 +33,7 @@ def main():
         print(f"Port {args.port} is occupied. Stop the previous app, or use .\\Start.ps1 -Port {args.port + 1}")
         return
     load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
-    if not os.environ.get("GEMINI_API_KEY") and not args.demo:
+    if not any(os.environ.get(k) for k in ("GEMINI_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "OPENROUTER_API_KEY")) and not args.demo:
         try:
             key = getpass.getpass("Gemini API key (hidden; Enter to browse saved briefings): ").strip()
         except (EOFError, KeyboardInterrupt):

@@ -70,7 +70,7 @@ It supports personal interests without losing the week's important headlines."
 ### 2:30-3:00 — Architecture and next step
 
 "Python handles discovery, source reading, ranking arithmetic and persistence.
-Gemini makes bounded editorial decisions and writes grounded explanations.
+Configured cloud models make bounded editorial decisions and writes grounded explanations.
 The browser exposes the evidence and activity, so this is inspectable."
 
 "Next I would measure editorial quality with team feedback, add scheduled Teams
@@ -143,3 +143,19 @@ editorial evaluation and team delivery operations remain future work.
 - Wrong saved demo: leave presentation mode, choose the right archive and pin it.
 - No internet: use the saved view or exported file; source links may not open.
 - Stop a long live run: Cancel run. The current request may finish before it stops.
+
+
+## Safe demo startup after reliability updates
+
+Stop any previously running server with Ctrl+C, then:
+
+~~~powershell
+cd C:\Users\ad51287\agentic-ai-course\ai-morning-brief
+.\Start.ps1 -Port 8877 -Demo
+~~~
+
+Open http://127.0.0.1:8877/?demo=1 and hard-refresh once. This shows the actual
+saved nine-story presentation, with its original date; it makes no model calls.
+A live run is optional. If the live providers fail, the app returns to this
+clearly labelled saved presentation. This is a recovery feature, not a new live
+result. The reviewed presentation snapshot remains unchanged.

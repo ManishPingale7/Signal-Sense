@@ -36,7 +36,7 @@ python -m venv .venv
 ~~~
 
 Copy .env.example to .env only if .env does not already exist. Set GEMINI_API_KEY
-locally. Never share the file. Existing Windows environment values take precedence
+or GROQ_API_KEY, MISTRAL_API_KEY, or OPENROUTER_API_KEY locally. Never share the file. Existing Windows environment values take precedence
 over .env. The launcher accepts a hidden session-only key, or Enter to browse saved
 briefings without a key.
 
@@ -58,7 +58,7 @@ visible and do not masquerade as zero news.
 
 ## Target count and recovery
 
-Choose 10, 15, or 25 updates as a target. The editor reviews up to 120 new candidates
+Choose 10, 15, or 25 updates as a target. The editor reviews up to 30 new candidates
 per round and keeps noteworthy reserves. It tries alternate coverage when an
 article is unavailable, replaces unsupported/omitted stories, and can run up to two
 follow-up search rounds. Up to five highest-priority stories lead the issue; the
@@ -70,11 +70,11 @@ insufficient. A partial briefing states the count and reason. Nothing is invente
 or duplicated to fill the count. Empty or failed runs preserve the previous
 briefing; non-empty partial results are saved with their shortfall clearly marked.
 
-Budgets: 18 actual model requests including fallback attempts; up to 3 * target + 15
+Budgets: 18 editorial calls and at most 24 provider attempts including fallbacks; up to 3 * target + 15
 source reads; at most two follow-up rounds; a 15-minute checkpoint between processing
 batches. An in-flight network request may finish after that checkpoint. Individual
-model requests have a 60-second configured timeout and automatic SDK retries are
-disabled. Source HTTP reads have connect/read timeouts and a size limit.
+model requests have a 45-second configured timeout and automatic SDK retries are
+disabled. Source HTTP reads have connect/read timeouts, a 30-second elapsed-time check during reading, and a size limit.
 
 Cancel run stops after the current blocking operation finishes. It may take up to a
 request timeout, and does not cancel a request already received by the model provider.
@@ -146,7 +146,7 @@ This reduces bursts; it does not guarantee remaining daily/token quota.
 Typically a 15-story briefing needs one editorial review and three writer calls,
 plus any follow-up, omission recovery or fallback. The UI reports the actual model
 call count. More stories/search rounds use more quota; no fixed free-tier allowance
-or price is assumed. Groq and local Laya integration are deferred.
+or price is assumed. Gemini, Groq, Mistral and OpenRouter are supported. Local Laya integration is deferred.
 
 ## Optional Teams
 
@@ -167,3 +167,23 @@ node --check static/app.js
 See DEMO_GUIDE.md for the reviewed presentation snapshot, walkthrough and recovery steps.
 This remains a local prototype: no scheduled delivery, authentication, or guarantee
 of exhaustive news coverage. Model judgments and extracted dates can be wrong.
+
+
+## Demo reliability
+
+- Review routing: Groq, Gemini, Mistral, OpenRouter; writing routing: Gemini,
+  Groq, Mistral, OpenRouter. Only configured providers are called.
+- Failed providers are skipped for the rest of the run. A rate limit sets a
+  five-minute cooldown; other failures set a one-minute cooldown across runs
+  within the same server process. Restarting the server resets these timers.
+- SDK retries are disabled, so the router controls the request budget.
+- If no live briefing can be produced, the browser automatically opens the
+  pinned/bundled saved presentation with its original date clearly shown.
+  Live errors never overwrite that snapshot. Successful partial results retain
+  their shortfall explanation.
+- Use the saved demo button at any time, including while a live run is running.
+  This does not cancel that run; use Cancel run before switching if desired.
+- Saved cards, filters and export remain usable after a network failure once the
+  page is loaded. Opening original links still needs an internet connection.
+
+See [TEST_REPORT.md](TEST_REPORT.md) for the tested failure matrix and limits.

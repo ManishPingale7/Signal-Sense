@@ -9,6 +9,19 @@ ROOT = Path(__file__).resolve().parent / "data"
 ARCHIVE = ROOT / "history"
 
 
+def valid_briefing(item):
+    """Reject corrupt saved data before it reaches the UI or Teams formatter."""
+    if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"]:
+        return False
+    if not isinstance(item.get("generated_at"), str) or not isinstance(item.get("opening"), str):
+        return False
+    stories = item.get("stories")
+    return isinstance(stories, list) and bool(stories) and all(
+        isinstance(story, dict) and all(isinstance(story.get(key), str) for key in
+        ("title", "url", "deck", "summary", "why_it_matters", "evidence"))
+        for story in stories)
+
+
 def history() -> list[dict]:
     paths = list(ARCHIVE.glob("*.json")) if ARCHIVE.exists() else []
     paths.append(ROOT / "latest.json")  # Includes briefings created before history existed.
@@ -16,7 +29,7 @@ def history() -> list[dict]:
     for path in paths:
         try:
             item = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(item, dict) and item.get("id"):
+            if valid_briefing(item):
                 found[item["id"]] = item
         except (OSError, ValueError):
             continue

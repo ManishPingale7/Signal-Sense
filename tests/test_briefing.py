@@ -51,7 +51,7 @@ class Harness:
             raise OSError("Fixture inaccessible")
         return {"url": url, "text": "Source evidence. " * 80, "published": ""}
 
-    def ask(self, prompt, schema):
+    def ask(self, prompt, schema, task="write"):
         if schema is Review:
             catalog = json.loads(prompt[prompt.index('{"mode":'):])["CATALOG"]
             return Review(events=[{
@@ -131,7 +131,7 @@ class BriefingTests(unittest.TestCase):
     def test_provider_error_preserves_partial_result(self):
         h = Harness([item(i) for i in range(15)])
         original = h.ask
-        def fail_second_batch(prompt, schema):
+        def fail_second_batch(prompt, schema, task="write"):
             if schema is WrittenBrief and h.writes == 1:
                 raise TimeoutError()
             return original(prompt, schema)
@@ -196,7 +196,7 @@ class AppTests(unittest.TestCase):
             with patch.object(app, "LATEST", target), patch.object(app, "run", side_effect=TimeoutError()):
                 app._worker({})
                 self.assertEqual(json.loads(target.read_text())["id"], "previous")
-                self.assertEqual(app.state["status"], "error")
+                self.assertEqual(app.state["status"], "fallback")
 
     def test_routes_and_demo_have_no_external_calls(self):
         import app
